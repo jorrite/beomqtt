@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320">
+  <defs>
+    <!-- full-bleed matrix on the same 28px pitch the mark sits on;
+         x/y offsets phase-align it with the lockup's grid -->
+    <pattern id="matrix" width="28" height="28" x="3" y="20" patternUnits="userSpaceOnUse">
+      <circle cx="0" cy="0" r="1.4" fill="#8E959B" fill-opacity="0.22"/>
+      <circle cx="28" cy="0" r="1.4" fill="#8E959B" fill-opacity="0.22"/>
+      <circle cx="0" cy="28" r="1.4" fill="#8E959B" fill-opacity="0.22"/>
+      <circle cx="28" cy="28" r="1.4" fill="#8E959B" fill-opacity="0.22"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="320" fill="#1B1D1F"/>
+  <rect width="1200" height="320" fill="url(#matrix)"/>
+  <!-- the empty perforation is emptier than the background: mask its texture dot -->
+  <circle cx="479" cy="160" r="4.2" fill="#1B1D1F"/>
+  <g transform="translate(185,0)">
+  <g fill="#8E959B">
+    <circle cx="70" cy="104" r="6.3"/><circle cx="98" cy="104" r="6.3"/><circle cx="126" cy="104" r="6.3"/><circle cx="154" cy="104" r="6.3"/><circle cx="182" cy="104" r="6.3"/><circle cx="210" cy="104" r="6.3"/><circle cx="238" cy="104" r="6.3"/><circle cx="266" cy="104" r="6.3"/><circle cx="294" cy="104" r="6.3"/>
+    <circle cx="70" cy="132" r="6.3"/><circle cx="98" cy="132" r="6.3"/><circle cx="126" cy="132" r="6.3"/><circle cx="154" cy="132" r="6.3"/><circle cx="182" cy="132" r="6.3"/><circle cx="210" cy="132" r="6.3"/><circle cx="238" cy="132" r="6.3"/><circle cx="266" cy="132" r="6.3"/><circle cx="294" cy="132" r="6.3"/>
+    <circle cx="70" cy="160" r="6.3"/><circle cx="98" cy="160" r="6.3"/><circle cx="126" cy="160" r="6.3"/><circle cx="154" cy="160" r="6.3"/><circle cx="182" cy="160" r="6.3"/><circle cx="210" cy="160" r="6.3"/><circle cx="238" cy="160" r="6.3"/><circle cx="266" cy="160" r="6.3"/>
+    <circle cx="70" cy="188" r="6.3"/><circle cx="98" cy="188" r="6.3"/><circle cx="126" cy="188" r="6.3"/><circle cx="154" cy="188" r="6.3"/><circle cx="182" cy="188" r="6.3"/><circle cx="210" cy="188" r="6.3"/><circle cx="238" cy="188" r="6.3"/><circle cx="266" cy="188" r="6.3"/><circle cx="294" cy="188" r="6.3"/>
+    <circle cx="70" cy="216" r="6.3"/><circle cx="98" cy="216" r="6.3"/><circle cx="126" cy="216" r="6.3"/><circle cx="154" cy="216" r="6.3"/><circle cx="182" cy="216" r="6.3"/><circle cx="210" cy="216" r="6.3"/><circle cx="238" cy="216" r="6.3"/><circle cx="266" cy="216" r="6.3"/><circle cx="294" cy="216" r="6.3"/>
+  </g>
+  <circle cx="350" cy="160" r="8.7" fill="#C9A868"/>
+  <text x="410" y="184" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="78" font-weight="500" letter-spacing="-1" fill="#E6E3DD">beomqtt</text>
+  <text x="413" y="226" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="15" font-weight="400" letter-spacing="3.2" fill="#93968F">BANG &amp; OLUFSEN MOZART &#8594; MQTT</text>
+  </g>
+</svg>
