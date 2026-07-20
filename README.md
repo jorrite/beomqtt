@@ -18,29 +18,23 @@
 ## What this is
 
 Mozart-platform devices (Beolab, Beosound, Beoconnect Core, Beosound
-Theatre, …) expose a local REST API (HTTP, port 80) and a WebSocket
-notification channel (port 9339) that pushes state changes: playback,
-volume, source, now-playing metadata, battery, remote control button
-presses. beomqtt subscribes to those notifications and republishes them
-as MQTT topics on a broker of your choosing.
+Theatre, …) expose a local [REST API and WebSocket notification
+channel][mozart-api] that pushes state changes: playback, volume,
+source, now-playing metadata, battery, remote control button presses.
+beomqtt subscribes to those notifications and republishes them as MQTT
+topics on a broker of your choosing — no audio touches this process,
+just JSON in and MQTT out. It's plain MQTT, so it works with Home
+Assistant, openHAB, Node-RED, or anything else that speaks the protocol.
 
-It is deliberately generic: nothing here is specific to Home Assistant,
-openHAB, Node-RED, Loxone, or any other consumer. If it speaks MQTT, it
-can use this bridge. (A sibling project, `beolox`, consumes these topics
-to emulate a Loxone Audio Server — beomqtt has no dependency on it, in
-either direction.)
+[mozart-api]: https://bang-olufsen.github.io/mozart-open-api/
 
-What it is **not**:
-
-- It never touches audio. No streams, no resampling, no media proxying —
-  JSON in, MQTT out.
-- No web UI, no HTTP server, no local state. Everything observable lives
-  on the broker; inspect it with MQTT Explorer or `mosquitto_sub`.
-- One process bridges exactly **one** device. Run one instance per device
-  (containers make this trivial — see below). This is a feature, not a
-  limitation: MQTT last-will is per-connection, so with one device per
-  process the *broker itself* flips the device's `available` topic to
-  `offline` the moment the bridge dies — no stale state, no code.
+One process bridges exactly **one** device — run one instance per
+speaker (containers make this trivial; see below). MQTT's last-will is
+per-connection, so with one device per process the *broker itself* flips
+that device's `available` topic to `offline` the instant the bridge
+dies, with no code needed to make that true. There's no web UI or local
+state either: everything observable lives on the broker, inspectable
+with MQTT Explorer or `mosquitto_sub`.
 
 ## Configuration
 
@@ -87,45 +81,29 @@ OpenAPI spec) is mapped.
 | `remote/<key…>` | no | `press` / `release` — Beoremote One buttons, e.g. `remote/control/play` |
 | `button/<name>` | no | the device's own physical buttons; payload is Mozart's state string (`shortPress`, `longPress`, `released`, …) |
 
-### Passthrough state topics (retained, raw Mozart JSON)
+<details>
+<summary><strong>Passthrough topics</strong> — the remaining 27 notification types, raw Mozart JSON (click to expand)</summary>
 
 The payload is the notification's `eventData` verbatim — the shape is
 whatever the [Mozart OpenAPI spec] defines for that event.
 
-| Topic | Source notification |
-|---|---|
-| `state/active_hdmi_input_signal` | ActiveHdmiInputSignal |
-| `state/listening_mode` | ActiveListeningMode |
-| `state/speaker_group` | ActiveSpeakerGroup |
-| `state/speaker_group_config` | SpeakerGroupChanged |
-| `state/speaker_link_status` | SpeakerLinkStatusChanged |
-| `state/alarm_timer` | AlarmTimer |
-| `state/channel_survey_status` | ChannelSurveyStatus |
-| `state/classics_adapter_content` | ClassicsAdapterContent |
-| `state/curtains` | Curtains |
-| `state/hdmi_video_format_signal` | HdmiVideoFormatSignal |
-| `state/playback_source` | PlaybackSource |
-| `state/powerlink_connection_state` | PowerlinkConnectionState |
-| `state/puc_install_remote_id_status` | PucInstallRemoteIdStatus |
-| `state/room_compensation_state` | RoomCompensationState |
-| `state/software_update_state` | SoftwareUpdateState |
-| `state/sound_settings` | SoundSettings |
-| `state/stand_connected` | StandConnected |
-| `state/stand_position` | StandPosition |
-| `state/tv_bno_mode` | TvBnOMode |
-| `state/tv_info` | TvInfo |
-| `state/wisa_out_state` | WisaOutState |
+Retained, under `state/`: `active_hdmi_input_signal`, `listening_mode`,
+`speaker_group`, `speaker_group_config`, `speaker_link_status`,
+`alarm_timer`, `channel_survey_status`, `classics_adapter_content`,
+`curtains`, `hdmi_video_format_signal`, `playback_source`,
+`powerlink_connection_state`, `puc_install_remote_id_status`,
+`room_compensation_state`, `software_update_state`, `sound_settings`,
+`stand_connected`, `stand_position`, `tv_bno_mode`, `tv_info`,
+`wisa_out_state` — each name maps to the identically-named
+`WebSocketEvent*` notification (e.g. `state/curtains` ← `Curtains`).
 
-### Momentary events (not retained, raw Mozart JSON)
+Not retained, under `event/`: `alarm_triggered`,
+`beolink_experiences_result`, `beolink_join_result`, `notification` (a
+"re-fetch your config" hint from the device, e.g.
+`{"value":"configuration"}`), `playback_error`,
+`room_compensation_measurement`.
 
-| Topic | Source notification |
-|---|---|
-| `event/alarm_triggered` | AlarmTriggered |
-| `event/beolink_experiences_result` | BeolinkExperiencesResult |
-| `event/beolink_join_result` | BeolinkJoinResult |
-| `event/notification` | Notification (a "re-fetch your config" hint from the device, e.g. `{"value":"configuration"}`) |
-| `event/playback_error` | PlaybackError |
-| `event/room_compensation_measurement` | RoomCompensationCurrentMeasurementEvent |
+</details>
 
 State topics are retained so a subscriber connecting later immediately
 sees last-known state; on (re)connect the device pushes a full state
@@ -138,24 +116,17 @@ the raw ingredients are all published above). Commands *to* the device
 
 ## Running
 
-### Plain binary
-
 ```sh
-BEOMQTT_DEVICE=192.168.1.23 \
-BEOMQTT_MQTT_URL=tcp://broker:1883 \
-./beomqtt
-```
+BEOMQTT_DEVICE=192.168.1.23 BEOMQTT_MQTT_URL=tcp://broker:1883 ./beomqtt
 
-### Docker
-
-```sh
+# or as a container:
 docker run -d --restart unless-stopped \
   -e BEOMQTT_DEVICE=192.168.1.23 \
   -e BEOMQTT_MQTT_URL=tcp://user:pass@broker:1883 \
-  ghcr.io/jorrite/beomqtt   # image name TBD
+  ghcr.io/jorrite/beomqtt
 ```
 
-### docker-compose, one service per device
+For multiple devices, run one container per device — with compose:
 
 ```yaml
 services:
@@ -175,53 +146,30 @@ services:
       BEOMQTT_MQTT_URL: tcp://broker:1883
 ```
 
-Under Nomad (or any orchestrator), the same applies: one task/alloc per
-device, env vars from your template/secret store of choice.
+Same idea under Nomad or any orchestrator: one task/alloc per device.
+Give devices DHCP reservations or a resolvable hostname — `.local` mDNS
+names work if the host OS resolves them, not inside minimal containers.
 
-Give devices DHCP reservations or use a resolvable hostname —
-`BEOMQTT_DEVICE` with a `.local` mDNS name works where the host OS
-resolves mDNS, but not inside minimal containers.
-
-## Behavior notes
-
-- **Resilient by default.** Both the device WebSocket (two endpoints: the
-  standard notification stream and the separate Beoremote One stream)
-  and the MQTT session reconnect automatically with backoff. Device
-  offline ≠ bridge crash: the bridge marks it `offline` and keeps
-  retrying forever.
-- **Clean shutdown.** SIGINT/SIGTERM publishes `available: offline`,
-  closes the WebSockets and the MQTT session gracefully.
-- **Startup order.** The bridge first identifies the device over REST
-  (retrying until reachable), then connects to the broker with the
-  last-will registered, then streams notifications.
+Both the device WebSocket and the MQTT session reconnect automatically
+with backoff, and SIGINT/SIGTERM shuts down cleanly, publishing
+`available: offline` first.
 
 ## Development
 
 ```sh
 just run 192.168.1.23 tcp://localhost:1883   # go run against a device
 just build                                    # static binary at bin/beomqtt
-just docker-build                             # multi-arch image
 just check && just test                       # what CI runs
 ```
 
-Requires `go` and `just` (e.g. via [mise](https://mise.jdx.dev/)), plus
-Docker for the image and for regenerating the REST client. For a quick
-local broker while testing:
+Requires `go` and `just`, plus Docker for the image and for regenerating
+the REST client (`just generate`, from the vendored [Mozart OpenAPI
+spec] — never hand-edit `internal/mozartapi`). Quick local broker:
 
 ```sh
 docker run -d --rm --name mosq -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
 docker exec mosq mosquitto_sub -t 'beomqtt/#' -v
 ```
-
-### Architecture, briefly
-
-- `internal/mozartapi` — REST client generated from the official
-  [Mozart OpenAPI spec] (vendored in `api/`); regenerate with
-  `just generate` (needs Docker). Never edit by hand.
-- `internal/mozartws` — hand-written WebSocket client for the
-  notification stream (including the separate Beoremote One event
-  socket), with jittered-backoff reconnection.
-- `internal/bridge` — the notification → topic mapping.
 
 [Mozart OpenAPI spec]: https://github.com/bang-olufsen/mozart-open-api
 
