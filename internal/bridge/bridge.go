@@ -9,11 +9,21 @@
 //
 // State topics are retained so a subscriber that connects later still sees
 // the current state; remote button events are moments in time and are not.
+//
+// Every structured (object-shaped) payload is published in one of two
+// forms, controlled by Bridge.Unwrap (BEOMQTT_PAYLOAD_FORMAT), never both:
+// a single JSON blob at its topic, or "unwrapped" — each field of the
+// decoded JSON republished under its own subtopic (objects become path
+// segments, arrays become numeric indices), e.g. state/battery/batteryLevel
+// instead of a state/battery JSON blob. Unwrapped is the default, matching
+// the one-value-per-topic convention some MQTT ecosystems expect (Homie,
+// Zigbee2MQTT attribute mode, Tasmota).
 package bridge
 
 import (
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,32 +43,21 @@ type DeviceInfo struct {
 	Host         string `json:"host"`
 }
 
-// NowPlaying is the flattened now-playing shape published on
-// state/nowplaying. Fields mirror the useful subset of the Mozart
-// PlaybackContentMetadata payload.
-type NowPlaying struct {
-	Source       string `json:"source,omitempty"`
-	Artist       string `json:"artist,omitempty"`
-	Title        string `json:"title,omitempty"`
-	Album        string `json:"album,omitempty"`
-	Genre        string `json:"genre,omitempty"`
-	Organization string `json:"organization,omitempty"`
-	ArtURL       string `json:"artUrl,omitempty"`
-}
-
 // Bridge publishes notifications from one Mozart device to MQTT. Safe for
 // concurrent use (notifications arrive from two WebSocket goroutines).
 type Bridge struct {
-	mqtt mqtt.Client
-	base string // "<prefix>/<device-id>"
-	log  *slog.Logger
+	mqtt   mqtt.Client
+	base   string // "<prefix>/<device-id>"
+	unwrap bool   // true: flattened per-field topics; false: one JSON blob
+	log    *slog.Logger
 }
 
-func New(client mqtt.Client, prefix, deviceID string, log *slog.Logger) *Bridge {
+func New(client mqtt.Client, prefix, deviceID string, unwrap bool, log *slog.Logger) *Bridge {
 	return &Bridge{
-		mqtt: client,
-		base: prefix + "/" + deviceID,
-		log:  log,
+		mqtt:   client,
+		base:   prefix + "/" + deviceID,
+		unwrap: unwrap,
+		log:    log,
 	}
 }
 
@@ -158,6 +157,11 @@ func (b *Bridge) HandleNotification(n mozartws.Notification) {
 		b.publishValue("state/role", n)
 
 	case "WebSocketEventVolume":
+		// state/volume and state/muted are convenience scalars (the
+		// values almost every consumer wants); VolumeState also carries
+		// default/maximum levels that those two don't surface, so the
+		// full object is published too, under its own topic rather than
+		// silently dropped.
 		var v mozartapi.VolumeState
 		if !b.decode(n, &v) {
 			return
@@ -168,8 +172,12 @@ func (b *Bridge) HandleNotification(n mozartws.Notification) {
 		if v.Muted != nil && v.Muted.Muted != nil {
 			b.publish(b.base+"/state/muted", *v.Muted.Muted, true)
 		}
+		b.publishStructured(b.base+"/state/volume_state", n.EventData, true)
 
 	case "WebSocketEventSourceChange":
+		// state/source is the convenience scalar (the source id); Source
+		// also carries name/type/capability flags that it doesn't
+		// surface, published in full under their own topic instead.
 		var s mozartapi.Source
 		if !b.decode(n, &s) {
 			return
@@ -177,18 +185,26 @@ func (b *Bridge) HandleNotification(n mozartws.Notification) {
 		if s.Id != nil {
 			b.publish(b.base+"/state/source", *s.Id, true)
 		}
+		b.publishStructured(b.base+"/state/source_state", n.EventData, true)
 
 	case "WebSocketEventPlaybackMetadata":
-		var m mozartapi.PlaybackContentMetadata
-		if !b.decode(n, &m) {
+		// Published as the full raw Mozart payload (all 22
+		// PlaybackContentMetadata fields, not a hand-picked subset) plus
+		// one convenience field: many sources (TV/HDMI passthrough in
+		// particular) only ever change fields like id/queueId/track
+		// between events, so curating down to a handful of "interesting"
+		// fields silently hid the very field that changed.
+		var fields map[string]any
+		if !b.decode(n, &fields) {
 			return
 		}
-		b.publishJSON(b.base+"/state/nowplaying", nowPlayingFrom(m), true)
+		if artURL := largestArtURL(fields["art"]); artURL != "" {
+			fields["artUrl"] = artURL
+		}
+		b.publishJSON(b.base+"/state/nowplaying", fields, true)
 
 	case "WebSocketEventBattery":
-		// The payload (BatteryState) is already flat and documented;
-		// republish as-is.
-		b.publish(b.base+"/state/battery", string(n.EventData), true)
+		b.publishStructured(b.base+"/state/battery", n.EventData, true)
 
 	case "WebSocketEventBeoRemoteButton":
 		var r mozartapi.BeoRemoteButton
@@ -212,7 +228,7 @@ func (b *Bridge) HandleNotification(n mozartws.Notification) {
 
 	default:
 		if pt, ok := passthroughTopics[n.EventType]; ok {
-			b.publish(b.base+"/"+pt.topic, string(n.EventData), pt.retained)
+			b.publishStructured(b.base+"/"+pt.topic, n.EventData, pt.retained)
 			return
 		}
 		// A type we don't know: either a spec update or a device
@@ -236,6 +252,13 @@ func (b *Bridge) publishValue(subtopic string, n mozartws.Notification) {
 // into remote/control/play with payload press/release.
 func (b *Bridge) publishRemoteButton(r mozartapi.BeoRemoteButton) {
 	if r.Key == nil || r.Type == nil {
+		// Silently dropping this made "why don't I see any remote
+		// events" indistinguishable from "the notification never
+		// arrived" (see: the Beoremote One only emits these while
+		// navigated into its Control or Light submenu — nothing to do
+		// with this code path, but worth being loud so it isn't
+		// mistaken for one).
+		b.log.Warn("BeoRemoteButton notification missing key or type", "key", r.Key, "type", r.Type)
 		return
 	}
 	var payload string
@@ -252,42 +275,40 @@ func (b *Bridge) publishRemoteButton(r mozartapi.BeoRemoteButton) {
 	b.publish(topic, payload, false)
 }
 
-func nowPlayingFrom(m mozartapi.PlaybackContentMetadata) NowPlaying {
-	np := NowPlaying{}
-	if m.Source != nil {
-		np.Source = *m.Source
+// largestArtURL picks the highest-resolution artwork URL out of a decoded
+// PlaybackContentMetadata "art" array (each entry has url/size) as a
+// convenience for consumers that just want one image. The full art array
+// is still published in full — this only adds a field, never removes one.
+func largestArtURL(art any) string {
+	entries, ok := art.([]any)
+	if !ok {
+		return ""
 	}
-	if m.ArtistName != nil {
-		np.Artist = *m.ArtistName
+	bySize := map[string]string{}
+	first := ""
+	for _, e := range entries {
+		entry, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		url, _ := entry["url"].(string)
+		size, _ := entry["size"].(string)
+		if url == "" {
+			continue
+		}
+		if first == "" {
+			first = url
+		}
+		if size != "" {
+			bySize[size] = url
+		}
 	}
-	if m.Title != nil {
-		np.Title = *m.Title
-	}
-	if m.AlbumName != nil {
-		np.Album = *m.AlbumName
-	}
-	if m.Genre != nil {
-		np.Genre = *m.Genre
-	}
-	if m.Organization != nil {
-		np.Organization = *m.Organization
-	}
-	// Prefer the largest artwork; entries are typically small/medium/large.
 	for _, size := range []string{"large", "medium", "small"} {
-		for _, art := range m.Art {
-			if art.Url != nil && art.Size != nil && *art.Size == size {
-				np.ArtURL = *art.Url
-				return np
-			}
+		if url, ok := bySize[size]; ok {
+			return url
 		}
 	}
-	for _, art := range m.Art {
-		if art.Url != nil {
-			np.ArtURL = *art.Url
-			break
-		}
-	}
-	return np
+	return first
 }
 
 func (b *Bridge) decode(n mozartws.Notification, into any) bool {
@@ -304,7 +325,42 @@ func (b *Bridge) publishJSON(topic string, v any, retained bool) {
 		b.log.Error("marshal payload", "topic", topic, "error", err)
 		return
 	}
-	b.publish(topic, string(data), retained)
+	b.publishStructured(topic, data, retained)
+}
+
+// publishStructured emits a structured (JSON-object) payload in whichever
+// form Bridge.unwrap selects — see package doc. Never both: doubling every
+// structured topic's publish volume for a redundant representation isn't
+// worth it when subscribers only ever want one or the other.
+func (b *Bridge) publishStructured(topic string, raw json.RawMessage, retained bool) {
+	if !b.unwrap {
+		b.publish(topic, string(raw), retained)
+		return
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		b.log.Warn("cannot decode payload", "topic", topic, "error", err)
+		return
+	}
+	b.flatten(topic, v, retained)
+}
+
+func (b *Bridge) flatten(topic string, v any, retained bool) {
+	switch val := v.(type) {
+	case map[string]any:
+		for k, child := range val {
+			b.flatten(topic+"/"+k, child, retained)
+		}
+	case []any:
+		for i, child := range val {
+			b.flatten(topic+"/"+strconv.Itoa(i), child, retained)
+		}
+	case nil:
+		// Omit: an empty retained topic would look like real data to a
+		// subscriber rather than "field absent".
+	default:
+		b.publish(topic, val, retained)
+	}
 }
 
 // publish fires QoS 1 and reports failures asynchronously: WS handler

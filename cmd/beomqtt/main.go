@@ -177,7 +177,7 @@ func connectMQTT(cfg *config.Config, deviceID string, logger *slog.Logger) (*bri
 	opts.SetWill(cfg.TopicPrefix+"/"+deviceID+"/available", "offline", 1, true)
 
 	client := mqtt.NewClient(opts)
-	br = bridge.New(client, cfg.TopicPrefix, deviceID, logger)
+	br = bridge.New(client, cfg.TopicPrefix, deviceID, cfg.PayloadFormat == "flattened", logger)
 
 	token := client.Connect()
 	if !token.WaitTimeout(30 * time.Second) {

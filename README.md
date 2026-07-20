@@ -38,7 +38,7 @@ with MQTT Explorer or `mosquitto_sub`.
 
 ## Configuration
 
-Environment variables only. Two required, three optional:
+Environment variables only. Two required, four optional:
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -47,6 +47,7 @@ Environment variables only. Two required, three optional:
 | `BEOMQTT_TOPIC_PREFIX` | no | `beomqtt` | First topic segment |
 | `BEOMQTT_DEVICE_ID` | no | *serial from JID* | Override for the `<device-id>` topic segment |
 | `BEOMQTT_LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
+| `BEOMQTT_PAYLOAD_FORMAT` | no | `flattened` | `flattened` — each field of a structured payload as its own subtopic; `json` — one JSON blob per topic. See below |
 
 The default `<device-id>` is the serial-number component of the device's
 Beolink JID (e.g. JID `1111.2222222.12345678@products.bang-olufsen.com`
@@ -63,6 +64,23 @@ All topics live under `<prefix>/<device-id>/` (default `beomqtt/<id>/`).
 The complete Mozart notification catalog (37 event types from the
 OpenAPI spec) is mapped.
 
+Every JSON-object payload is published in one of two forms, set by
+`BEOMQTT_PAYLOAD_FORMAT` — never both:
+
+- **`flattened`** (default): each field of the decoded object under its
+  own subtopic (nested objects become path segments, arrays become
+  numeric indices), e.g. `state/battery/batteryLevel`,
+  `state/battery/isCharging`, `state/battery/state` instead of a
+  `state/battery` blob. Matches the one-value-per-topic convention some
+  MQTT ecosystems expect (Homie, Zigbee2MQTT attribute mode, Tasmota).
+- **`json`**: the whole object as one blob at the topic itself, e.g.
+  `state/battery` → `{"batteryLevel":100,...}`.
+
+Absent/null fields are simply not published, in either form. Switching
+`BEOMQTT_PAYLOAD_FORMAT` does not retroactively clear the other format's
+retained topics on the broker — old retained blobs or leaves from before
+the switch linger until something overwrites or purges them.
+
 ### Core topics (curated payloads)
 
 | Topic | Retained | Payload |
@@ -70,10 +88,12 @@ OpenAPI spec) is mapped.
 | `available` | yes | `online` / `offline` — device reachability; also the bridge's MQTT last-will, so it reads `offline` if the bridge itself dies |
 | `info` | yes | JSON: `friendlyName`, `jid`, `serial`, `host` |
 | `state/playback` | yes | `idle`, `buffering`, `started`, `paused`, `stopped`, `ended`, `error`, `unknown` |
-| `state/volume` | yes | `0`–`100` |
-| `state/muted` | yes | `true` / `false` |
-| `state/source` | yes | source id, e.g. `spotify`, `lineIn`, `chromeCast` |
-| `state/nowplaying` | yes | JSON: `source`, `artist`, `title`, `album`, `genre`, `organization`, `artUrl` |
+| `state/volume` | yes | `0`–`100`, the convenience scalar most consumers want |
+| `state/muted` | yes | `true` / `false`, ditto |
+| `state/volume_state` | yes | the full Mozart `VolumeState` object: `level`, `muted`, plus `default` and `maximum` levels that the two scalars above don't carry |
+| `state/source` | yes | source id, e.g. `spotify`, `lineIn`, `chromeCast` — the convenience scalar |
+| `state/source_state` | yes | the full Mozart `Source` object: `id`, `name` (human-readable, e.g. `"AirPlay"`), `type`, `isEnabled`, `isPlayable`, `isSeekable`, `isMultiroomAvailable` |
+| `state/nowplaying` | yes | JSON: the full Mozart `PlaybackContentMetadata` payload as-is (`source`, `artist`, `title`, `album`, `genre`, `organization`, `bitrate`, `samplerate`, `queueId`, `track`, `id`, … — whatever fields the device sends for that source), plus one added field: `artUrl`, the largest artwork URL picked out of the raw `art` array as a convenience (the full `art` array is still there too) |
 | `state/battery` | yes | JSON: `batteryLevel`, `isCharging`, `remainingChargingTimeMinutes`, `remainingPlayingTimeMinutes`, `state` (battery devices only) |
 | `state/power` | yes | e.g. `on`, `networkStandby` |
 | `state/role` | yes | Beolink role, e.g. `standalone` |
