@@ -5,11 +5,12 @@ import "testing"
 func load(t *testing.T, env map[string]string) (*Config, error) {
 	t.Helper()
 	base := map[string]string{
-		"BEOMQTT_DEVICE":       "192.168.1.10",
-		"BEOMQTT_MQTT_URL":     "tcp://broker:1883",
-		"BEOMQTT_TOPIC_PREFIX": "",
-		"BEOMQTT_DEVICE_ID":    "",
-		"BEOMQTT_LOG_LEVEL":    "",
+		"BEOMQTT_DEVICE":         "192.168.1.10",
+		"BEOMQTT_MQTT_URL":       "tcp://broker:1883",
+		"BEOMQTT_TOPIC_PREFIX":   "",
+		"BEOMQTT_DEVICE_ID":      "",
+		"BEOMQTT_LOG_LEVEL":      "",
+		"BEOMQTT_PAYLOAD_FORMAT": "",
 	}
 	for k, v := range env {
 		base[k] = v
@@ -27,6 +28,23 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.TopicPrefix != "beomqtt" || cfg.BrokerURL != "tcp://broker:1883" {
 		t.Errorf("unexpected defaults: %+v", cfg)
+	}
+	if cfg.PayloadFormat != "flattened" {
+		t.Errorf("PayloadFormat default = %q, want \"flattened\"", cfg.PayloadFormat)
+	}
+}
+
+func TestPayloadFormat(t *testing.T) {
+	cfg, err := load(t, map[string]string{"BEOMQTT_PAYLOAD_FORMAT": "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PayloadFormat != "json" {
+		t.Errorf("PayloadFormat = %q, want \"json\"", cfg.PayloadFormat)
+	}
+
+	if _, err := load(t, map[string]string{"BEOMQTT_PAYLOAD_FORMAT": "yaml"}); err == nil {
+		t.Error("invalid BEOMQTT_PAYLOAD_FORMAT should be rejected")
 	}
 }
 

@@ -35,6 +35,13 @@ type Config struct {
 
 	// LogLevel parsed from BEOMQTT_LOG_LEVEL (default info).
 	LogLevel slog.Level
+
+	// PayloadFormat controls how structured (JSON-object) payloads are
+	// published: "flattened" (default) — each field as its own retained
+	// subtopic, e.g. state/battery/batteryLevel — or "json" — the whole
+	// object as one JSON blob at the topic. Never both.
+	// (BEOMQTT_PAYLOAD_FORMAT)
+	PayloadFormat string
 }
 
 // Load reads and validates the environment.
@@ -65,6 +72,14 @@ func Load() (*Config, error) {
 	}
 	if err := cfg.LogLevel.UnmarshalText([]byte(level)); err != nil {
 		return nil, fmt.Errorf("BEOMQTT_LOG_LEVEL: %w", err)
+	}
+
+	cfg.PayloadFormat = os.Getenv("BEOMQTT_PAYLOAD_FORMAT")
+	if cfg.PayloadFormat == "" {
+		cfg.PayloadFormat = "flattened"
+	}
+	if cfg.PayloadFormat != "flattened" && cfg.PayloadFormat != "json" {
+		return nil, fmt.Errorf(`BEOMQTT_PAYLOAD_FORMAT must be "flattened" or "json", got %q`, cfg.PayloadFormat)
 	}
 
 	return cfg, nil
