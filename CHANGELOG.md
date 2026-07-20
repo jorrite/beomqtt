@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/jorrite/beomqtt/compare/v1.0.0...v1.1.0) (2026-07-20)
+
+
+### Features
+
+* toggle json/flat publish mode ([41a389d](https://github.com/jorrite/beomqtt/commit/41a389d0b73fce6a9a4030732f0fb92ed403fd88))
+* toggle json/flat publish mode ([a37f732](https://github.com/jorrite/beomqtt/commit/a37f7325c5b4643030d0c4b43bececbe21967180))
+
 ## 1.0.0 (2026-07-20)
 
 
